@@ -4,17 +4,17 @@
   "description": "Queue markdown-based social posts to Buffer for X and LinkedIn from the terminal.",
   "type": "module",
   "bin": {
-    "socialbuffer": "./bin/tweetx.js",
-    "tweetx": "./bin/tweetx.js"
+    "socialbuffer": "./bin/socialbuffer.js",
+    "tweetx": "./bin/socialbuffer.js"
   },
   "files": [
     "bin",
     "README.md"
   ],
   "scripts": {
-    "start": "node ./bin/tweetx.js",
-    "check": "node ./bin/tweetx.js --help",
-    "check:dry-run": "node ./bin/tweetx.js post --file ./example-post.md --dry-run",
+    "start": "node ./bin/socialbuffer.js",
+    "check": "node ./bin/socialbuffer.js --help",
+    "check:dry-run": "node ./bin/socialbuffer.js post --file ./example-post.md --dry-run",
     "test": "npm run check && npm run check:dry-run"
   },
   "keywords": [

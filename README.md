@@ -2,7 +2,7 @@
 
 Minimal CLI for turning markdown files into queued Buffer posts for X and LinkedIn.
 
-`socialbuffer` is the public name. `tweetx` remains available as a backward-compatible command alias for now.
+`socialbuffer` is the public name and primary command. `tweetx` remains available as a backward-compatible alias for now.
 
 ## Run from source
 
@@ -11,8 +11,8 @@ Clone the repo, create a local `.env`, and run the CLI directly from source:
 ```sh
 nvm use
 cp .env.example .env
-node ./bin/tweetx.js --help
-node ./bin/tweetx.js post --file ./example-post.md --dry-run
+node ./bin/socialbuffer.js --help
+node ./bin/socialbuffer.js post --file ./example-post.md --dry-run
 ```
 
 The root `.env` is loaded automatically, so source usage works without a global install.
@@ -47,19 +47,19 @@ Use `~/.config/socialbuffer/.env` for the public config path. The older `tweetx`
 List Buffer channels:
 
 ```sh
-node ./bin/tweetx.js channels
+node ./bin/socialbuffer.js channels
 ```
 
 List only X/Twitter channels:
 
 ```sh
-node ./bin/tweetx.js channels --service twitter
+node ./bin/socialbuffer.js channels --service twitter
 ```
 
 List only LinkedIn channels:
 
 ```sh
-node ./bin/tweetx.js channels --service linkedin
+node ./bin/socialbuffer.js channels --service linkedin
 ```
 
 With a global install, the same commands become:
@@ -72,7 +72,7 @@ socialbuffer channels --service linkedin
 ## First command
 
 ```sh
-node ./bin/tweetx.js post --file ./post.md --dry-run
+node ./bin/socialbuffer.js post --file ./post.md --dry-run
 ```
 
 ## Setup

@@ -1,6 +1,6 @@
 # Shipping a tiny CLI
 
-Built the first `tweetx` slice today.
+Built the first `socialbuffer` slice today.
 
 - Reads a markdown file
 - Sends the text straight to Buffer
