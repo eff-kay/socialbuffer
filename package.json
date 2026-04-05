@@ -4,8 +4,8 @@
   "description": "Queue markdown-based social posts to Buffer for X and LinkedIn from the terminal.",
   "type": "module",
   "bin": {
-    "socialbuffer": "./bin/socialbuffer.js",
-    "tweetx": "./bin/socialbuffer.js"
+    "socialbuffer": "bin/socialbuffer.js",
+    "tweetx": "bin/socialbuffer.js"
   },
   "files": [
     "bin",
