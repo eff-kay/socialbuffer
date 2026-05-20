@@ -21,7 +21,7 @@ function printHelp() {
 
 Usage:
   ${PRIMARY_CLI_NAME} channels [--service twitter|x|linkedin] [--api-key API_KEY]
-  ${PRIMARY_CLI_NAME} post --file path/to/post.md [--platform x|linkedin] [--image path/to/file.png | --image-url https://...] [--alt "alt text"] [--mode addToQueue|shareNow|customScheduled] [--due-at 2026-04-13T09:00:00-04:00] [--channel CHANNEL_ID] [--api-key API_KEY] [--dry-run]
+  ${PRIMARY_CLI_NAME} post --file path/to/post.md [--platform x|linkedin] [--image path/to/file.png | --image-url https://... | --video-url https://...] [--alt "alt text"] [--thumbnail-url https://...] [--video-title "title"] [--mode addToQueue|shareNow|customScheduled] [--due-at 2026-04-13T09:00:00-04:00] [--channel CHANNEL_ID] [--api-key API_KEY] [--dry-run]
   ${PRIMARY_CLI_NAME} edit --id BUFFER_POST_ID [--file path/to/post.md | --text "replacement text"] [--mode addToQueue|shareNow|shareNext|customScheduled|recommendedTime] [--due-at 2026-04-13T09:00:00-04:00] [--api-key API_KEY] [--dry-run]
   ${PRIMARY_CLI_NAME} reschedule --id BUFFER_POST_ID --due-at 2026-04-13T09:00:00-04:00 [--file path/to/post.md | --text "replacement text"] [--api-key API_KEY] [--dry-run]
   ${PRIMARY_CLI_NAME} delete --id BUFFER_POST_ID [--api-key API_KEY] [--dry-run]
@@ -45,6 +45,7 @@ Examples:
   ${PRIMARY_CLI_NAME} post --platform linkedin --file ./post.md
   ${PRIMARY_CLI_NAME} post --file ./post.md --image ./shot.png
   ${PRIMARY_CLI_NAME} post --file ./post.md --image-url https://example.com/shot.png
+  ${PRIMARY_CLI_NAME} post --file ./post.md --video-url https://example.com/clip.mp4
   ${PRIMARY_CLI_NAME} post --file ./post.md --mode shareNow
   ${PRIMARY_CLI_NAME} post --file ./post.md --dry-run
   ${PRIMARY_CLI_NAME} reschedule --id 123 --due-at 2026-04-13T09:00:00-04:00
@@ -232,29 +233,46 @@ async function loadImageAsset(filePath, altText) {
   const bytes = await readFile(filePath);
   const mimeType = getMimeType(filePath);
   const dataUrl = `data:${mimeType};base64,${bytes.toString("base64")}`;
-  return {
-    images: [
-      {
+  return [
+    {
+      image: {
         url: dataUrl,
         metadata: {
           altText: altText || defaultAltText(filePath),
         },
       },
-    ],
-  };
+    },
+  ];
 }
 
-function loadRemoteImageAsset(imageUrl, altText) {
-  return {
-    images: [
-      {
+function loadRemoteImageAsset(imageUrl, altText, thumbnailUrl) {
+  return [
+    {
+      image: {
         url: imageUrl,
+        thumbnailUrl: thumbnailUrl || undefined,
         metadata: {
           altText: altText || "Attached image",
         },
       },
-    ],
-  };
+    },
+  ];
+}
+
+function loadRemoteVideoAsset(videoUrl, { thumbnailUrl, title }) {
+  return [
+    {
+      video: {
+        url: videoUrl,
+        thumbnailUrl: thumbnailUrl || undefined,
+        metadata: title
+          ? {
+              title,
+            }
+          : undefined,
+      },
+    },
+  ];
 }
 
 async function postJson(url, apiKey, body) {
@@ -415,12 +433,8 @@ async function createBufferPost({ apiKey, channelId, text, mode, assets, dueAt }
     fail("Buffer response did not include createPost");
   }
 
-  if (result.__typename === "MutationError") {
-    fail(result.message || "Buffer mutation failed");
-  }
-
   if (result.__typename !== "PostActionSuccess" || !result.post) {
-    fail(`unexpected Buffer response type: ${result.__typename || "unknown"}`);
+    fail(result.message || `unexpected Buffer response type: ${result.__typename || "unknown"}`);
   }
 
   return result.post;
@@ -925,11 +939,23 @@ async function handlePost(options) {
   const dueAt = options["due-at"] || "";
   const imagePath = options.image;
   const imageUrl = options["image-url"];
+  const videoUrl = options["video-url"];
+  const thumbnailUrl = options["thumbnail-url"];
+  const videoTitle = options["video-title"];
 
   validateModeAndDueAt(mode, dueAt, VALID_MODES);
 
-  if (imagePath && imageUrl) {
-    fail("use either --image or --image-url, not both");
+  const selectedMediaCount = [imagePath, imageUrl, videoUrl].filter(Boolean).length;
+  if (selectedMediaCount > 1) {
+    fail("use only one media source: --image, --image-url, or --video-url");
+  }
+
+  if (videoTitle && !videoUrl) {
+    fail("--video-title requires --video-url");
+  }
+
+  if (thumbnailUrl && !imageUrl && !videoUrl) {
+    fail("--thumbnail-url requires --image-url or --video-url");
   }
 
   if (!apiKey && !options.dryRun) {
@@ -948,8 +974,10 @@ async function handlePost(options) {
   const assets = imagePath
     ? await loadImageAsset(imagePath, options.alt)
     : imageUrl
-      ? loadRemoteImageAsset(imageUrl, options.alt)
-      : undefined;
+      ? loadRemoteImageAsset(imageUrl, options.alt, thumbnailUrl)
+      : videoUrl
+        ? loadRemoteVideoAsset(videoUrl, { thumbnailUrl, title: videoTitle })
+        : undefined;
 
   if (options.dryRun) {
     console.log(
@@ -959,6 +987,9 @@ async function handlePost(options) {
           filePath,
           imagePath: imagePath || null,
           imageUrl: imageUrl || null,
+          videoUrl: videoUrl || null,
+          thumbnailUrl: thumbnailUrl || null,
+          videoTitle: videoTitle || null,
           mode,
           dueAt: dueAt || null,
           platform,
