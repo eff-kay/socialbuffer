@@ -14,7 +14,7 @@
   "scripts": {
     "start": "node ./bin/socialbuffer.js",
     "check": "node ./bin/socialbuffer.js --help",
-    "check:dry-run": "node ./bin/socialbuffer.js post --file ./example-post.md --dry-run",
+    "check:dry-run": "node ./bin/socialbuffer.js post --file ./example-post.md --channel test-channel --dry-run",
     "test": "npm run check && npm run check:dry-run"
   },
   "keywords": [

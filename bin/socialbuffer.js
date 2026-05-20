@@ -11,7 +11,8 @@ const PRIMARY_CLI_NAME = "socialbuffer";
 const LEGACY_CLI_NAME = "tweetx";
 const BUFFER_ENDPOINT = "https://api.buffer.com";
 const X_API_ENDPOINT = "https://api.x.com/2";
-const VALID_MODES = new Set(["addToQueue", "shareNow"]);
+const VALID_MODES = new Set(["addToQueue", "shareNow", "customScheduled"]);
+const VALID_EDIT_MODES = new Set(["addToQueue", "shareNow", "shareNext", "customScheduled", "recommendedTime"]);
 const VALID_POST_PLATFORMS = new Set(["x", "linkedin"]);
 const VALID_SORTS = new Set(["engagement", "recent", "likes", "reposts", "replies", "quotes"]);
 
@@ -20,7 +21,10 @@ function printHelp() {
 
 Usage:
   ${PRIMARY_CLI_NAME} channels [--service twitter|x|linkedin] [--api-key API_KEY]
-  ${PRIMARY_CLI_NAME} post --file path/to/post.md [--platform x|linkedin] [--image path/to/file.png | --image-url https://...] [--alt "alt text"] [--mode addToQueue|shareNow] [--channel CHANNEL_ID] [--api-key API_KEY] [--dry-run]
+  ${PRIMARY_CLI_NAME} post --file path/to/post.md [--platform x|linkedin] [--image path/to/file.png | --image-url https://...] [--alt "alt text"] [--mode addToQueue|shareNow|customScheduled] [--due-at 2026-04-13T09:00:00-04:00] [--channel CHANNEL_ID] [--api-key API_KEY] [--dry-run]
+  ${PRIMARY_CLI_NAME} edit --id BUFFER_POST_ID [--file path/to/post.md | --text "replacement text"] [--mode addToQueue|shareNow|shareNext|customScheduled|recommendedTime] [--due-at 2026-04-13T09:00:00-04:00] [--api-key API_KEY] [--dry-run]
+  ${PRIMARY_CLI_NAME} reschedule --id BUFFER_POST_ID --due-at 2026-04-13T09:00:00-04:00 [--file path/to/post.md | --text "replacement text"] [--api-key API_KEY] [--dry-run]
+  ${PRIMARY_CLI_NAME} delete --id BUFFER_POST_ID [--api-key API_KEY] [--dry-run]
   ${PRIMARY_CLI_NAME} analytics --username USERNAME [--limit N] [--sort engagement|recent|likes|reposts|replies|quotes] [--include-replies true|false] [--include-retweets true|false] [--x-token TOKEN]
 
 Environment:
@@ -43,6 +47,8 @@ Examples:
   ${PRIMARY_CLI_NAME} post --file ./post.md --image-url https://example.com/shot.png
   ${PRIMARY_CLI_NAME} post --file ./post.md --mode shareNow
   ${PRIMARY_CLI_NAME} post --file ./post.md --dry-run
+  ${PRIMARY_CLI_NAME} reschedule --id 123 --due-at 2026-04-13T09:00:00-04:00
+  ${PRIMARY_CLI_NAME} delete --id 123
   ${PRIMARY_CLI_NAME} analytics --username xdevelopers
   ${PRIMARY_CLI_NAME} analytics --username xdevelopers --limit 20 --sort likes
 `);
@@ -189,6 +195,15 @@ async function loadPostText(filePath) {
     fail("post file is empty after trimming");
   }
   return text;
+}
+
+function loadInlineText(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) {
+    fail("--text is empty after trimming");
+  }
+
+  return normalized;
 }
 
 function getMimeType(filePath) {
@@ -354,7 +369,7 @@ async function getJson(url, token) {
   });
 }
 
-async function createBufferPost({ apiKey, channelId, text, mode, assets }) {
+async function createBufferPost({ apiKey, channelId, text, mode, assets, dueAt }) {
   const query = `
     mutation CreatePost($input: CreatePostInput!) {
       createPost(input: $input) {
@@ -379,6 +394,7 @@ async function createBufferPost({ apiKey, channelId, text, mode, assets }) {
         channelId,
         mode,
         schedulingType: "automatic",
+        dueAt: dueAt || null,
         text,
         assets,
       },
@@ -410,6 +426,141 @@ async function createBufferPost({ apiKey, channelId, text, mode, assets }) {
   return result.post;
 }
 
+async function fetchBufferPost({ apiKey, id }) {
+  const data = await queryBufferGraphql({
+    apiKey,
+    query: `
+      query Post($input: PostInput!) {
+        post(input: $input) {
+          id
+          status
+          dueAt
+          sentAt
+          createdAt
+          updatedAt
+          text
+          externalLink
+          channelId
+          channelService
+          shareMode
+          sharedNow
+          allowedActions
+          channel {
+            id
+            service
+            name
+            displayName
+            timezone
+          }
+        }
+      }
+    `,
+    variables: {
+      input: { id },
+    },
+  });
+
+  if (!data?.post) {
+    fail(`Buffer post not found: ${id}`);
+  }
+
+  return data.post;
+}
+
+async function editBufferPost({ apiKey, id, text, mode, dueAt }) {
+  const data = await queryBufferGraphql({
+    apiKey,
+    query: `
+      mutation EditPost($input: EditPostInput!) {
+        editPost(input: $input) {
+          __typename
+          ... on PostActionSuccess {
+            post {
+              id
+              text
+              status
+              dueAt
+              sentAt
+              shareMode
+            }
+          }
+          ... on NotFoundError {
+            message
+          }
+          ... on UnauthorizedError {
+            message
+          }
+          ... on UnexpectedError {
+            message
+          }
+          ... on RestProxyError {
+            message
+          }
+          ... on LimitReachedError {
+            message
+          }
+          ... on InvalidInputError {
+            message
+          }
+        }
+      }
+    `,
+    variables: {
+      input: {
+        id,
+        schedulingType: "automatic",
+        dueAt: dueAt || null,
+        text,
+        mode,
+      },
+    },
+  });
+
+  const result = data?.editPost;
+  if (!result) {
+    fail("Buffer response did not include editPost");
+  }
+
+  if (result.__typename !== "PostActionSuccess" || !result.post) {
+    fail(result.message || `unexpected Buffer response type: ${result.__typename || "unknown"}`);
+  }
+
+  return result.post;
+}
+
+async function deleteBufferPost({ apiKey, id }) {
+  const data = await queryBufferGraphql({
+    apiKey,
+    query: `
+      mutation DeletePost($input: DeletePostInput!) {
+        deletePost(input: $input) {
+          __typename
+          ... on DeletePostSuccess {
+            id
+          }
+          ... on VoidMutationError {
+            message
+          }
+        }
+      }
+    `,
+    variables: {
+      input: { id },
+    },
+  });
+
+  const result = data?.deletePost;
+  if (!result) {
+    fail("Buffer response did not include deletePost");
+  }
+
+  if (result.__typename !== "DeletePostSuccess") {
+    fail(result.message || `unexpected Buffer response type: ${result.__typename || "unknown"}`);
+  }
+
+  return result;
+}
+
 async function queryBufferGraphql({ apiKey, query, variables }) {
   const { ok, status, payload } = await postJson(BUFFER_ENDPOINT, apiKey, {
     query,
@@ -426,6 +577,52 @@ async function queryBufferGraphql({ apiKey, query, variables }) {
   }
 
   return payload?.data;
+}
+
+function validateModeAndDueAt(mode, dueAt, validModes = VALID_MODES) {
+  if (!validModes.has(mode)) {
+    fail(`--mode must be one of: ${Array.from(validModes).join(", ")}`);
+  }
+
+  if (mode === "customScheduled" && !dueAt) {
+    fail("--due-at is required when --mode customScheduled is used");
+  }
+
+  if (mode !== "customScheduled" && dueAt) {
+    fail("--due-at can only be used with --mode customScheduled");
+  }
+}
+
+function assertPostActionAllowed(post, actions) {
+  const expectedActions = Array.isArray(actions) ? actions : [actions];
+  if (!Array.isArray(post.allowedActions) || expectedActions.some((action) => post.allowedActions.includes(action))) {
+    return;
+  }
+
+  const channel = post.channel?.displayName || post.channel?.name || post.channelId;
+  fail(
+    `Buffer will not allow ${expectedActions.join("/")} for post ${post.id} (${post.status}) on ${channel}. Allowed actions: ${post.allowedActions.join(", ")}`,
+  );
+}
+
+async function resolveEditText({ options, existingText }) {
+  if (options.file && options.text) {
+    fail("use either --file or --text, not both");
+  }
+
+  if (options.text) {
+    return loadInlineText(options.text);
+  }
+
+  if (options.file) {
+    return loadPostText(options.file);
+  }
+
+  if (!existingText) {
+    fail("No existing post text found; pass --file or --text");
+  }
+
+  return existingText;
 }
 
 function parseBooleanOption(value, fallback = false) {
@@ -725,12 +922,11 @@ async function handlePost(options) {
   const platform = normalizePostPlatform(options.platform);
   const channelId = resolveChannelId({ platform, channel: options.channel });
   const mode = options.mode || "addToQueue";
+  const dueAt = options["due-at"] || "";
   const imagePath = options.image;
   const imageUrl = options["image-url"];
 
-  if (!VALID_MODES.has(mode)) {
-    fail(`--mode must be one of: ${Array.from(VALID_MODES).join(", ")}`);
-  }
+  validateModeAndDueAt(mode, dueAt, VALID_MODES);
 
   if (imagePath && imageUrl) {
     fail("use either --image or --image-url, not both");
@@ -764,6 +960,7 @@ async function handlePost(options) {
           imagePath: imagePath || null,
           imageUrl: imageUrl || null,
           mode,
+          dueAt: dueAt || null,
           platform,
           text,
           hasAssets: Boolean(assets),
@@ -779,6 +976,7 @@ async function handlePost(options) {
     apiKey,
     channelId,
     mode,
+    dueAt,
     text,
     assets,
   });
@@ -789,9 +987,126 @@ async function handlePost(options) {
         ok: true,
         channelId,
         id: post.id,
+        dueAt: dueAt || null,
         mode,
         platform,
         text: post.text,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function handleEdit(options) {
+  const id = options.id;
+  if (!id) {
+    fail("--id is required");
+  }
+
+  const apiKey = options["api-key"] || process.env.BUFFER_API_KEY;
+  const mode = options.mode || "addToQueue";
+  const dueAt = options["due-at"] || "";
+  validateModeAndDueAt(mode, dueAt, VALID_EDIT_MODES);
+
+  if (!apiKey && !options.dryRun) {
+    fail("BUFFER_API_KEY is required unless --dry-run is used");
+  }
+
+  const existingPost = await fetchBufferPost({ apiKey, id });
+  const text = await resolveEditText({ options, existingText: existingPost.text });
+
+  if (options.dryRun) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          action: "edit",
+          id,
+          existingStatus: existingPost.status,
+          existingShareMode: existingPost.shareMode,
+          existingDueAt: existingPost.dueAt,
+          allowedActions: existingPost.allowedActions,
+          mode,
+          dueAt: dueAt || null,
+          text,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  assertPostActionAllowed(existingPost, ["updatePost", "updatePostSchedule"]);
+  const post = await editBufferPost({ apiKey, id, text, mode, dueAt });
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        action: "edit",
+        id: post.id,
+        status: post.status,
+        mode: post.shareMode,
+        dueAt: post.dueAt,
+        sentAt: post.sentAt,
+        text: post.text,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function handleReschedule(options) {
+  await handleEdit({
+    ...options,
+    mode: "customScheduled",
+  });
+}
+
+async function handleDelete(options) {
+  const id = options.id;
+  if (!id) {
+    fail("--id is required");
+  }
+
+  const apiKey = options["api-key"] || process.env.BUFFER_API_KEY;
+  if (!apiKey && !options.dryRun) {
+    fail("BUFFER_API_KEY is required unless --dry-run is used");
+  }
+
+  const existingPost = await fetchBufferPost({ apiKey, id });
+
+  if (options.dryRun) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          action: "delete",
+          id,
+          existingStatus: existingPost.status,
+          existingDueAt: existingPost.dueAt,
+          allowedActions: existingPost.allowedActions,
+          text: existingPost.text,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  assertPostActionAllowed(existingPost, "deletePost");
+  const result = await deleteBufferPost({ apiKey, id });
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        action: "delete",
+        id: result.id,
       },
       null,
       2,
@@ -877,6 +1192,21 @@ async function main() {
 
   if (command === "post") {
     await handlePost(options);
+    return;
+  }
+
+  if (command === "edit") {
+    await handleEdit(options);
+    return;
+  }
+
+  if (command === "reschedule") {
+    await handleReschedule(options);
+    return;
+  }
+
+  if (command === "delete") {
+    await handleDelete(options);
     return;
   }
 
