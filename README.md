@@ -13,6 +13,7 @@ nvm use
 cp .env.example .env
 node ./bin/socialbuffer.js --help
 node ./bin/socialbuffer.js post --file ./example-post.md --dry-run
+node ./bin/socialbuffer.js delete --id BUFFER_POST_ID --dry-run
 ```
 
 The root `.env` is loaded automatically, so source usage works without a global install.
@@ -126,6 +127,30 @@ Preview the payload without sending anything:
 socialbuffer post --file ./post.md --dry-run
 ```
 
+Schedule at an exact time:
+
+```sh
+socialbuffer post --file ./post.md --mode customScheduled --due-at 2026-04-13T09:00:00-04:00
+```
+
+Edit a scheduled post in place:
+
+```sh
+socialbuffer edit --id BUFFER_POST_ID --file ./post.md
+```
+
+Reschedule a scheduled post:
+
+```sh
+socialbuffer reschedule --id BUFFER_POST_ID --due-at 2026-04-13T09:00:00-04:00
+```
+
+Delete a scheduled post:
+
+```sh
+socialbuffer delete --id BUFFER_POST_ID
+```
+
 Read X analytics:
 
 ```sh
@@ -138,6 +163,8 @@ socialbuffer analytics --username xdevelopers
 - `channels` uses Buffer's GraphQL API so it works with the API key from Buffer's API settings page.
 - The CLI auto-loads values from global config files and then lets the current directory's `.env` override them.
 - `post` defaults to platform `x`. Use `--platform linkedin` to target the configured LinkedIn channel.
+- `post` also supports `--mode customScheduled --due-at <ISO_TIMESTAMP>` for exact scheduling.
+- `edit`, `reschedule`, and `delete` only work when Buffer exposes the corresponding action for that post.
 - `analytics` uses the X API directly and expects `X_BEARER_TOKEN` in `.env` or a supported global env file.
 - `BUFFER_CHANNEL_ID` remains supported as a legacy fallback for X only.
 - YAML frontmatter is stripped if present at the top of the file.
