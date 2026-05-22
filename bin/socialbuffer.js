@@ -10,6 +10,7 @@ import process from "node:process";
 const PRIMARY_CLI_NAME = "socialbuffer";
 const LEGACY_CLI_NAME = "tweetx";
 const BUFFER_ENDPOINT = "https://api.buffer.com";
+const TMPFILES_UPLOAD_ENDPOINT = "https://tmpfiles.org/api/v1/upload";
 const X_API_ENDPOINT = "https://api.x.com/2";
 const VALID_MODES = new Set(["addToQueue", "shareNow", "customScheduled"]);
 const VALID_EDIT_MODES = new Set(["addToQueue", "shareNow", "shareNext", "customScheduled", "recommendedTime"]);
@@ -21,7 +22,7 @@ function printHelp() {
 
 Usage:
   ${PRIMARY_CLI_NAME} channels [--service twitter|x|linkedin] [--api-key API_KEY]
-  ${PRIMARY_CLI_NAME} post --file path/to/post.md [--platform x|linkedin] [--image path/to/file.png | --image-url https://...] [--alt "alt text"] [--mode addToQueue|shareNow|customScheduled] [--due-at 2026-04-13T09:00:00-04:00] [--channel CHANNEL_ID] [--api-key API_KEY] [--dry-run]
+  ${PRIMARY_CLI_NAME} post --file path/to/post.md [--platform x|linkedin] [--image path/to/file.png | --image-url https://... | --video-url https://...] [--alt "alt text"] [--thumbnail-url https://...] [--video-title "title"] [--mode addToQueue|shareNow|customScheduled] [--due-at 2026-04-13T09:00:00-04:00] [--channel CHANNEL_ID] [--api-key API_KEY] [--dry-run]
   ${PRIMARY_CLI_NAME} edit --id BUFFER_POST_ID [--file path/to/post.md | --text "replacement text"] [--mode addToQueue|shareNow|shareNext|customScheduled|recommendedTime] [--due-at 2026-04-13T09:00:00-04:00] [--api-key API_KEY] [--dry-run]
   ${PRIMARY_CLI_NAME} reschedule --id BUFFER_POST_ID --due-at 2026-04-13T09:00:00-04:00 [--file path/to/post.md | --text "replacement text"] [--api-key API_KEY] [--dry-run]
   ${PRIMARY_CLI_NAME} delete --id BUFFER_POST_ID [--api-key API_KEY] [--dry-run]
@@ -45,6 +46,7 @@ Examples:
   ${PRIMARY_CLI_NAME} post --platform linkedin --file ./post.md
   ${PRIMARY_CLI_NAME} post --file ./post.md --image ./shot.png
   ${PRIMARY_CLI_NAME} post --file ./post.md --image-url https://example.com/shot.png
+  ${PRIMARY_CLI_NAME} post --file ./post.md --video-url https://example.com/clip.mp4
   ${PRIMARY_CLI_NAME} post --file ./post.md --mode shareNow
   ${PRIMARY_CLI_NAME} post --file ./post.md --dry-run
   ${PRIMARY_CLI_NAME} reschedule --id 123 --due-at 2026-04-13T09:00:00-04:00
@@ -228,33 +230,71 @@ function defaultAltText(filePath) {
   return filename.replace(/[_-]+/g, " ").trim() || "Attached image";
 }
 
-async function loadImageAsset(filePath, altText) {
+async function uploadLocalImage(filePath) {
   const bytes = await readFile(filePath);
   const mimeType = getMimeType(filePath);
-  const dataUrl = `data:${mimeType};base64,${bytes.toString("base64")}`;
-  return {
-    images: [
-      {
-        url: dataUrl,
-        metadata: {
-          altText: altText || defaultAltText(filePath),
-        },
-      },
-    ],
-  };
+  const form = new FormData();
+  form.set("file", new File([bytes], basename(filePath), { type: mimeType }));
+
+  const response = await fetch(TMPFILES_UPLOAD_ENDPOINT, {
+    method: "POST",
+    body: form,
+  });
+
+  const rawText = await response.text();
+  let payload;
+
+  try {
+    payload = JSON.parse(rawText);
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    fail(`temporary image upload failed with ${response.status}: ${rawText}`);
+  }
+
+  const pageUrl = payload?.data?.url;
+  if (!pageUrl || typeof pageUrl !== "string") {
+    fail(`temporary image upload did not return a file URL: ${rawText}`);
+  }
+
+  return pageUrl.replace("https://tmpfiles.org/", "https://tmpfiles.org/dl/");
 }
 
-function loadRemoteImageAsset(imageUrl, altText) {
-  return {
-    images: [
-      {
+async function loadImageAsset(filePath, altText) {
+  const uploadedImageUrl = await uploadLocalImage(filePath);
+  return loadRemoteImageAsset(uploadedImageUrl, altText);
+}
+
+function loadRemoteImageAsset(imageUrl, altText, thumbnailUrl) {
+  return [
+    {
+      image: {
         url: imageUrl,
+        thumbnailUrl: thumbnailUrl || undefined,
         metadata: {
           altText: altText || "Attached image",
         },
       },
-    ],
-  };
+    },
+  ];
+}
+
+function loadRemoteVideoAsset(videoUrl, { thumbnailUrl, title }) {
+  return [
+    {
+      video: {
+        url: videoUrl,
+        thumbnailUrl: thumbnailUrl || undefined,
+        metadata: title
+          ? {
+              title,
+            }
+          : undefined,
+      },
+    },
+  ];
 }
 
 async function postJson(url, apiKey, body) {
@@ -415,12 +455,8 @@ async function createBufferPost({ apiKey, channelId, text, mode, assets, dueAt }
     fail("Buffer response did not include createPost");
   }
 
-  if (result.__typename === "MutationError") {
-    fail(result.message || "Buffer mutation failed");
-  }
-
   if (result.__typename !== "PostActionSuccess" || !result.post) {
-    fail(`unexpected Buffer response type: ${result.__typename || "unknown"}`);
+    fail(result.message || `unexpected Buffer response type: ${result.__typename || "unknown"}`);
   }
 
   return result.post;
@@ -925,11 +961,23 @@ async function handlePost(options) {
   const dueAt = options["due-at"] || "";
   const imagePath = options.image;
   const imageUrl = options["image-url"];
+  const videoUrl = options["video-url"];
+  const thumbnailUrl = options["thumbnail-url"];
+  const videoTitle = options["video-title"];
 
   validateModeAndDueAt(mode, dueAt, VALID_MODES);
 
-  if (imagePath && imageUrl) {
-    fail("use either --image or --image-url, not both");
+  const selectedMediaCount = [imagePath, imageUrl, videoUrl].filter(Boolean).length;
+  if (selectedMediaCount > 1) {
+    fail("use only one media source: --image, --image-url, or --video-url");
+  }
+
+  if (videoTitle && !videoUrl) {
+    fail("--video-title requires --video-url");
+  }
+
+  if (thumbnailUrl && !imageUrl && !videoUrl) {
+    fail("--thumbnail-url requires --image-url or --video-url");
   }
 
   if (!apiKey && !options.dryRun) {
@@ -945,11 +993,17 @@ async function handlePost(options) {
   }
 
   const text = await loadPostText(filePath);
-  const assets = imagePath
-    ? await loadImageAsset(imagePath, options.alt)
-    : imageUrl
-      ? loadRemoteImageAsset(imageUrl, options.alt)
-      : undefined;
+  const assets = options.dryRun
+    ? imagePath || imageUrl || videoUrl
+      ? [{}]
+      : undefined
+    : imagePath
+      ? await loadImageAsset(imagePath, options.alt)
+      : imageUrl
+        ? loadRemoteImageAsset(imageUrl, options.alt, thumbnailUrl)
+        : videoUrl
+          ? loadRemoteVideoAsset(videoUrl, { thumbnailUrl, title: videoTitle })
+          : undefined;
 
   if (options.dryRun) {
     console.log(
@@ -959,6 +1013,9 @@ async function handlePost(options) {
           filePath,
           imagePath: imagePath || null,
           imageUrl: imageUrl || null,
+          videoUrl: videoUrl || null,
+          thumbnailUrl: thumbnailUrl || null,
+          videoTitle: videoTitle || null,
           mode,
           dueAt: dueAt || null,
           platform,

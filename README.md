@@ -14,6 +14,7 @@ cp .env.example .env
 node ./bin/socialbuffer.js --help
 node ./bin/socialbuffer.js post --file ./example-post.md --dry-run
 node ./bin/socialbuffer.js delete --id BUFFER_POST_ID --dry-run
+node ./bin/socialbuffer.js post --file ./example-post.md --video-url https://example.com/clip.mp4 --dry-run
 ```
 
 The root `.env` is loaded automatically, so source usage works without a global install.
@@ -115,6 +116,18 @@ Queue a post with one remote image URL:
 socialbuffer post --file ./post.md --image-url https://example.com/shot.png
 ```
 
+Queue a post with one remote video URL:
+
+```sh
+socialbuffer post --file ./post.md --video-url https://example.com/clip.mp4
+```
+
+Queue a post with one remote video URL and an explicit thumbnail:
+
+```sh
+socialbuffer post --file ./post.md --video-url https://example.com/clip.mp4 --thumbnail-url https://example.com/thumb.jpg --video-title "Demo clip"
+```
+
 Share immediately:
 
 ```sh
@@ -164,6 +177,12 @@ socialbuffer analytics --username xdevelopers
 - The CLI auto-loads values from global config files and then lets the current directory's `.env` override them.
 - `post` defaults to platform `x`. Use `--platform linkedin` to target the configured LinkedIn channel.
 - `post` also supports `--mode customScheduled --due-at <ISO_TIMESTAMP>` for exact scheduling.
+- Buffer's GraphQL API expects `assets` as a list of `AssetInput` objects (`[{ image: ... }]`, `[{ video: ... }]`, etc.). The older `{ images: [...] }` shape is only a deprecated compatibility path.
+- Local image files are uploaded to `tmpfiles.org` first, then passed to Buffer as remote image URLs.
+- This makes `--image ./local-file.png` work around Buffer rejecting practical inline `data:` image URLs with errors like `URI Too Long`.
+- Because of that fallback, local-image posting now creates a temporary public URL for the media before publishing.
+- Remote videos work with `--video-url`; Buffer fetches the media and thumbnail from the provided URL.
+- Local video files are not wired up yet because inline `data:video/...` payloads quickly exceed Buffer's request-size limit; they need a separate upload/hosting step first.
 - `edit`, `reschedule`, and `delete` only work when Buffer exposes the corresponding action for that post.
 - `analytics` uses the X API directly and expects `X_BEARER_TOKEN` in `.env` or a supported global env file.
 - `BUFFER_CHANNEL_ID` remains supported as a legacy fallback for X only.
