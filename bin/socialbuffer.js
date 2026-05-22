@@ -10,6 +10,7 @@ import process from "node:process";
 const PRIMARY_CLI_NAME = "socialbuffer";
 const LEGACY_CLI_NAME = "tweetx";
 const BUFFER_ENDPOINT = "https://api.buffer.com";
+const TMPFILES_UPLOAD_ENDPOINT = "https://tmpfiles.org/api/v1/upload";
 const X_API_ENDPOINT = "https://api.x.com/2";
 const VALID_MODES = new Set(["addToQueue", "shareNow", "customScheduled"]);
 const VALID_EDIT_MODES = new Set(["addToQueue", "shareNow", "shareNext", "customScheduled", "recommendedTime"]);
@@ -229,20 +230,41 @@ function defaultAltText(filePath) {
   return filename.replace(/[_-]+/g, " ").trim() || "Attached image";
 }
 
-async function loadImageAsset(filePath, altText) {
+async function uploadLocalImage(filePath) {
   const bytes = await readFile(filePath);
   const mimeType = getMimeType(filePath);
-  const dataUrl = `data:${mimeType};base64,${bytes.toString("base64")}`;
-  return [
-    {
-      image: {
-        url: dataUrl,
-        metadata: {
-          altText: altText || defaultAltText(filePath),
-        },
-      },
-    },
-  ];
+  const form = new FormData();
+  form.set("file", new File([bytes], basename(filePath), { type: mimeType }));
+
+  const response = await fetch(TMPFILES_UPLOAD_ENDPOINT, {
+    method: "POST",
+    body: form,
+  });
+
+  const rawText = await response.text();
+  let payload;
+
+  try {
+    payload = JSON.parse(rawText);
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    fail(`temporary image upload failed with ${response.status}: ${rawText}`);
+  }
+
+  const pageUrl = payload?.data?.url;
+  if (!pageUrl || typeof pageUrl !== "string") {
+    fail(`temporary image upload did not return a file URL: ${rawText}`);
+  }
+
+  return pageUrl.replace("https://tmpfiles.org/", "https://tmpfiles.org/dl/");
+}
+
+async function loadImageAsset(filePath, altText) {
+  const uploadedImageUrl = await uploadLocalImage(filePath);
+  return loadRemoteImageAsset(uploadedImageUrl, altText);
 }
 
 function loadRemoteImageAsset(imageUrl, altText, thumbnailUrl) {
@@ -971,13 +993,17 @@ async function handlePost(options) {
   }
 
   const text = await loadPostText(filePath);
-  const assets = imagePath
-    ? await loadImageAsset(imagePath, options.alt)
-    : imageUrl
-      ? loadRemoteImageAsset(imageUrl, options.alt, thumbnailUrl)
-      : videoUrl
-        ? loadRemoteVideoAsset(videoUrl, { thumbnailUrl, title: videoTitle })
-        : undefined;
+  const assets = options.dryRun
+    ? imagePath || imageUrl || videoUrl
+      ? [{}]
+      : undefined
+    : imagePath
+      ? await loadImageAsset(imagePath, options.alt)
+      : imageUrl
+        ? loadRemoteImageAsset(imageUrl, options.alt, thumbnailUrl)
+        : videoUrl
+          ? loadRemoteVideoAsset(videoUrl, { thumbnailUrl, title: videoTitle })
+          : undefined;
 
   if (options.dryRun) {
     console.log(

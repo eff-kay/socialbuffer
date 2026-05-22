@@ -178,7 +178,9 @@ socialbuffer analytics --username xdevelopers
 - `post` defaults to platform `x`. Use `--platform linkedin` to target the configured LinkedIn channel.
 - `post` also supports `--mode customScheduled --due-at <ISO_TIMESTAMP>` for exact scheduling.
 - Buffer's GraphQL API expects `assets` as a list of `AssetInput` objects (`[{ image: ... }]`, `[{ video: ... }]`, etc.). The older `{ images: [...] }` shape is only a deprecated compatibility path.
-- Local image files work by being encoded as `data:` URLs before createPost.
+- Local image files are uploaded to `tmpfiles.org` first, then passed to Buffer as remote image URLs.
+- This makes `--image ./local-file.png` work around Buffer rejecting practical inline `data:` image URLs with errors like `URI Too Long`.
+- Because of that fallback, local-image posting now creates a temporary public URL for the media before publishing.
 - Remote videos work with `--video-url`; Buffer fetches the media and thumbnail from the provided URL.
 - Local video files are not wired up yet because inline `data:video/...` payloads quickly exceed Buffer's request-size limit; they need a separate upload/hosting step first.
 - `edit`, `reschedule`, and `delete` only work when Buffer exposes the corresponding action for that post.
