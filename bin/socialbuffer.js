@@ -9,7 +9,7 @@ import process from "node:process";
 
 const PRIMARY_CLI_NAME = "socialbuffer";
 const LEGACY_CLI_NAME = "tweetx";
-const BUFFER_ENDPOINT = "https://api.buffer.com";
+const BUFFER_ENDPOINT = "https://api.buffer.com/graphql";
 const TMPFILES_UPLOAD_ENDPOINT = "https://tmpfiles.org/api/v1/upload";
 const X_API_ENDPOINT = "https://api.x.com/2";
 const VALID_MODES = new Set(["addToQueue", "shareNow", "customScheduled"]);
@@ -111,12 +111,10 @@ function resolveEnvPaths() {
 }
 
 function loadEnvFiles() {
-  const originalKeys = new Set(Object.keys(process.env));
-
   for (const envPath of resolveEnvPaths()) {
     const values = parseEnvFile(envPath);
     for (const [key, value] of Object.entries(values)) {
-      if (originalKeys.has(key)) {
+      if (process.env[key] !== undefined) {
         continue;
       }
 
@@ -298,60 +296,31 @@ function loadRemoteVideoAsset(videoUrl, { thumbnailUrl, title }) {
 }
 
 async function postJson(url, apiKey, body) {
-  const target = new URL(url);
-
-  return new Promise((resolvePromise, rejectPromise) => {
-    const req = request(
-      {
-        method: "POST",
-        protocol: target.protocol,
-        hostname: target.hostname,
-        port: target.port || undefined,
-        path: `${target.pathname}${target.search}`,
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${apiKey}`,
-        },
-      },
-      (response) => {
-        let responseBody = "";
-
-        response.setEncoding("utf8");
-        response.on("data", (chunk) => {
-          responseBody += chunk;
-        });
-        response.on("end", () => {
-          let payload = null;
-
-          if (responseBody) {
-            try {
-              payload = JSON.parse(responseBody);
-            } catch (error) {
-              rejectPromise(
-                new Error(
-                  `Buffer returned invalid JSON with status ${response.statusCode || "unknown"}`,
-                ),
-              );
-              return;
-            }
-          }
-
-          resolvePromise({
-            ok: (response.statusCode || 500) >= 200 && (response.statusCode || 500) < 300,
-            status: response.statusCode || 500,
-            payload,
-          });
-        });
-      },
-    );
-
-    req.on("error", (error) => {
-      rejectPromise(error);
-    });
-
-    req.write(JSON.stringify(body));
-    req.end();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
   });
+  const responseBody = await response.text();
+  let payload = null;
+
+  if (responseBody) {
+    try {
+      payload = JSON.parse(responseBody);
+    } catch {
+      throw new Error(`Buffer returned invalid JSON with status ${response.status}`);
+    }
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    payload,
+  };
 }
 
 async function getJson(url, token) {

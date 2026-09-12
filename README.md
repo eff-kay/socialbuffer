@@ -174,7 +174,7 @@ socialbuffer analytics --username xdevelopers
 
 - The first version reads the markdown file as source text and flattens markdown formatting before publish.
 - `channels` uses Buffer's GraphQL API so it works with the API key from Buffer's API settings page.
-- The CLI auto-loads values from global config files and then lets the current directory's `.env` override them.
+- The CLI uses the first defined value for each environment variable. Process environment values and an explicit `SOCIALBUFFER_ENV_FILE` take precedence; the canonical global config is loaded before legacy and project-local files.
 - `post` defaults to platform `x`. Use `--platform linkedin` to target the configured LinkedIn channel.
 - `post` also supports `--mode customScheduled --due-at <ISO_TIMESTAMP>` for exact scheduling.
 - Buffer's GraphQL API expects `assets` as a list of `AssetInput` objects (`[{ image: ... }]`, `[{ video: ... }]`, etc.). The older `{ images: [...] }` shape is only a deprecated compatibility path.
