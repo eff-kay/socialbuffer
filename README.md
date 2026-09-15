@@ -172,6 +172,7 @@ socialbuffer analytics --username xdevelopers
 
 ## Notes
 
+- Media support is currently being tightened up against Buffer's live API. See `docs/media-support-investigation.md` for the exact asset shapes and local-file caveats discovered during testing.
 - The first version reads the markdown file as source text and flattens markdown formatting before publish.
 - `channels` uses Buffer's GraphQL API so it works with the API key from Buffer's API settings page.
 - The CLI uses the first defined value for each environment variable. Process environment values and an explicit `SOCIALBUFFER_ENV_FILE` take precedence; the canonical global config is loaded before legacy and project-local files.
